@@ -201,24 +201,27 @@ import Mic from './MicrophoneIcon.vue'
 import avatarLabel from './robot/assets/AI讲解标签.png?inline'
 import { useRobotVisualState } from './robot/useRobotVisualState'
 
-// Animate the shell while observing its natural-sized content, so rapid updates
-// continue from the currently displayed height instead of restarting at the old size.
+// The content is anchored to the shell bottom. Only the top edge moves when
+// messages/timeline visibility change, so transport and input stay stationary.
 const panelHeightEffects = new WeakMap<HTMLElement, () => void>()
 const vSmoothHeight = {
   mounted(el: HTMLElement) {
-    if (typeof ResizeObserver === 'undefined') return
     const content = el.firstElementChild as HTMLElement
+    const border = () => el.offsetHeight - el.clientHeight
     let target = content.getBoundingClientRect().height
+    el.style.height = `${target + border()}px`
+    if (typeof ResizeObserver === 'undefined') return
     let effect: Animation | null = null
     const observer = new ResizeObserver(() => {
       const next = content.getBoundingClientRect().height
       if (Math.abs(next - target) < .5) return
-      const border = el.offsetHeight - el.clientHeight
-      const from = effect?.playState === 'running' ? el.getBoundingClientRect().height : target + border
+      const from = el.getBoundingClientRect().height
       target = next
       effect?.cancel()
+      const to = next + border()
+      el.style.height = `${to}px`
       if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || !el.animate) return
-      effect = el.animate([{ height: `${from}px` }, { height: `${next + border}px` }], {
+      effect = el.animate([{ height: `${from}px` }, { height: `${to}px` }], {
         duration: 300, easing: 'cubic-bezier(.22,1,.36,1)',
       })
     })
@@ -923,7 +926,7 @@ defineExpose({
 .aeb-clock { flex: 1; text-align: center; font-size: 13px; color: var(--aeb-fg-secondary); }
 
 /* Expanded player */
-.aeb-panel { width: var(--aeb-panel-width); max-height: min(var(--aeb-panel-height), calc(100dvh - 56px)); display: flex; flex-direction: column; }
+.aeb-panel { position: relative; width: var(--aeb-panel-width); max-height: min(var(--aeb-panel-height), calc(100dvh - 56px)); display: flex; flex-direction: column; }
 .aeb-panel-header { padding: 15px 17px 0; flex-shrink: 0; }
 .aeb-status-inline { display: none; }
 .aeb-presence { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; padding: 20px 20px 18px; }
@@ -1134,7 +1137,7 @@ defineExpose({
 .aeb-avatar.aeb-avatar-ip{position:relative}
 .aeb-avatar .aeb-avatar-label{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:45px;height:19px;object-fit:contain;z-index:4;pointer-events:none;user-select:none}
 .aeb-panel{border-radius:32px}
-.aeb-panel-content{display:flex;flex-direction:column;flex-shrink:0;min-height:0;max-height:inherit;width:100%}
+.aeb-panel-content{position:absolute;left:0;bottom:0;display:flex;flex-direction:column;flex-shrink:0;min-height:0;max-height:inherit;width:100%}
 .aeb-ai-bubble.aeb-answer-active{background:var(--aeb-highlight);color:var(--aeb-fg)}
 .aeb-ai-bubble .aeb-answerline.aeb-active{background:transparent;border-radius:0}
 .aeb-ai-message{max-width:92%}
