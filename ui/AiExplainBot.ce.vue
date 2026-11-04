@@ -32,7 +32,7 @@
         </div>
       </div>
       <div v-if="!voiceBusy" class="aeb-capsule-controls">
-        <button class="aeb-btn aeb-capsule-play" :aria-label="playing ? '暂停' : '播放'" :title="playing ? '暂停讲解' : '播放讲解'" :disabled="!playControlReady" :aria-busy="playLoading" @click="togglePlay"><LoaderCircle v-if="playLoading" :size="17" class="aeb-loading" aria-hidden="true" /><Pause v-else-if="playing" :size="17" fill="currentColor" /><Play v-else :size="17" fill="currentColor" /></button>
+        <button class="aeb-btn aeb-capsule-play" :aria-label="playing ? '暂停' : '播放'" :title="playing ? '暂停讲解' : '播放讲解'" :disabled="!playControlReady" :aria-busy="playLoading" @click="togglePlay"><LoaderCircle v-if="playLoading" :size="17" class="aeb-loading" aria-hidden="true" /><Pause v-else-if="playing" :size="15" fill="currentColor" /><Play v-else :size="15" fill="currentColor" /></button>
         <button v-if="canInterrupt" part="voice-mini" class="aeb-btn aeb-mic aeb-mic-mini" :disabled="!askReady" aria-label="点击说话" title="点击说话" @click="startClickVoice"><Mic :size="17" /></button>
         <button class="aeb-btn aeb-mini-rate" aria-label="倍速" :disabled="!controlReady" @click="cycleRate">{{ rate }}×</button>
       </div>
@@ -86,7 +86,8 @@
           @click="playBubble(i)" @keydown.enter.prevent="playBubble(i)" @keydown.space.prevent="playBubble(i)"
           :class="[`aeb-speaker-${line.speaker}`, { 'aeb-active': i === currentLineIndex && answerLineIndex < 0, 'aeb-past': i < currentLineIndex }]"
         >
-          <span class="aeb-speaker aeb-sr-only">AI · {{ speakerName(line.speaker) }}</span>
+          <span class="aeb-speaker"><span class="aeb-speaker-name">{{ speakerName(line.speaker) }}</span>
+                  <span v-if="isLineSpeaking(i)" class="aeb-speaking-wave" role="img" aria-label="正在朗读"><svg v-for="bar in 3" :key="bar" viewBox="0 0 2 12" aria-hidden="true"><line x1="1" y1="2" x2="1" y2="10" /></svg></span></span>
           <span class="aeb-text">{{ line.text }}</span>
         </p>
 
@@ -104,7 +105,8 @@
               @click="playAnswerBubble(g.id, g.done)" @keydown.enter.prevent="playAnswerBubble(g.id, g.done)" @keydown.space.prevent="playAnswerBubble(g.id, g.done)">
               <p v-for="(line, i) in g.lines" :key="line.lineId" class="aeb-line aeb-answerline" part="answer-line"
                 :class="[`aeb-speaker-${line.speaker}`, { 'aeb-active': g.id === activeGroupId && i === answerLineIndex }]">
-                <span class="aeb-speaker aeb-sr-only">AI · {{ speakerName(line.speaker) }}</span>
+                <span class="aeb-speaker"><span class="aeb-speaker-name">{{ speakerName(line.speaker) }}</span>
+                  <span v-if="isLineSpeaking(i, g.id)" class="aeb-speaking-wave" role="img" aria-label="正在朗读"><svg v-for="bar in 3" :key="bar" viewBox="0 0 2 12" aria-hidden="true"><line x1="1" y1="2" x2="1" y2="10" /></svg></span></span>
                 <span class="aeb-text">{{ line.text }}</span>
               </p>
               <p v-if="g.id === activeGroupId && answering && !g.lines.length" class="aeb-answer-pending" role="status"><LoaderCircle :size="13" class="aeb-loading" />{{ answerStatus === 'analyzing' ? '正在思考…' : '正在组织回答…' }}</p>
@@ -416,11 +418,18 @@ const timelineVisible = computed(() => !['idle', 'assembling', 'generating'].inc
 const controlReady = computed(() => !snap.value?.updating && !snap.value?.updateFailed && !voiceBusy.value && (['interpreting', 'playing', 'paused', 'ended'].includes(phase.value) || (answering.value && ['playing', 'paused'].includes(answerStatus.value) && timelineReady.value)))
 /** 主控播放入口放宽：回答暂停中仍可用——组头 ▶ 继续回答 / 主控 ▶ 回主轨双通道 */
 const playControlReady = computed(() => !voiceBusy.value && (controlReady.value || (answering.value && ['playing', 'paused'].includes(answerStatus.value))))
-/** 追问入口(输入框/发送/语音)放宽：回答暂停中仍可继续追问(收口暂停组发起新追问) */
-const askReady = computed(() => !voiceBusy.value && !snap.value?.updating && !snap.value?.updateFailed && ((!answering.value && controlReady.value) || (answering.value && answerStatus.value === 'paused')))
+/** 追问朗读和暂停期间均可继续提问；思考时禁用。 */
+const askReady = computed(() => !voiceBusy.value && !snap.value?.updating && !snap.value?.updateFailed && ((!answering.value && controlReady.value) || (answering.value && ['playing', 'paused'].includes(answerStatus.value))))
 const answerStatus = computed(() => snap.value?.answerStatus || 'none')
 const playLoading = computed(() => !playControlReady.value && (preparing.value || !!snap.value?.updating || answerStatus.value === 'analyzing'))
 const bubblePlaybackReady = computed(() => !voiceBusy.value && !snap.value?.updating && !snap.value?.updateFailed && (['playing', 'paused', 'ended'].includes(phase.value) || (answering.value && answerStatus.value !== 'analyzing')))
+/** Current-line highlighting may persist when paused; the sound bars must not. */
+function isLineSpeaking (index: number, groupId?: string) {
+  if (voiceBusy.value || snap.value?.updating || snap.value?.updateFailed) return false
+  if (groupId !== undefined) return phase.value === 'answering' && answerStatus.value === 'playing'
+    && groupId === activeGroupId.value && index === answerLineIndex.value
+  return phase.value === 'playing' && answerLineIndex.value < 0 && index === currentLineIndex.value
+}
 function playBubble (index: number) {
   if (!bubblePlaybackReady.value) return
   followPaused.value = false
@@ -935,7 +944,7 @@ defineExpose({
 .aeb-presence-hint { font-size: 13px; color: var(--aeb-fg-secondary); margin-top: 5px; }
 .aeb-subtitles { flex: 1 1 auto; min-height: 100px; max-height: 240px; overflow-y: auto; overscroll-behavior: contain; padding: 4px 20px 16px; scrollbar-width: thin; scrollbar-color: var(--aeb-border) transparent; }
 .aeb-placeholder { color: var(--aeb-fg-secondary); text-align: center; margin: 28px 0; }
-.aeb-line { display: grid; grid-template-columns: auto auto 1fr; gap: 5px 8px; align-items: baseline; margin: 0 0 10px; padding: 9px 11px; border-radius: 13px; font-size: 14px; line-height: 1.8; color: var(--aeb-fg-secondary); }
+.aeb-line { display: grid; grid-template-columns: auto auto 1fr; gap: 5px 8px; align-items: baseline; margin: 0 0 10px; padding: 9px 11px; border-radius: 13px; font-size: 14px; line-height: 1.4; color: var(--aeb-fg-secondary); }
 .aeb-line.aeb-active { color: var(--aeb-fg); background: var(--aeb-highlight); }
 .aeb-speaker { font-size: 12px; color: var(--aeb-fg-secondary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aeb-stamp { font-size: 12px; color: var(--aeb-fg-secondary); }
@@ -1023,7 +1032,7 @@ defineExpose({
 .aeb-group-toggle:hover { background: var(--aeb-bg-soft); }
 .aeb-ai-bubble { background: var(--aeb-bg-soft); border-radius: 6px 14px 14px 14px; padding: 4px; }
 .aeb-ai-bubble .aeb-answerline { margin: 0; padding: 8px 10px; color: var(--aeb-fg); }
-.aeb-ai-bubble .aeb-answerline .aeb-speaker { display: none; }
+.aeb-ai-bubble .aeb-answerline .aeb-speaker { display: flex; }
 .aeb-ai-bubble .aeb-answerline.aeb-active { background: var(--aeb-highlight); border-radius: 12px; }
 .aeb-answer-pending { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
 .aeb-answer-collapsed { background: transparent; padding: 8px 0; border: 0; font-size: 13px !important; color: var(--aeb-fg-secondary); cursor: pointer; }
@@ -1123,7 +1132,9 @@ defineExpose({
 .aeb-mini-state{display:inline-flex;align-items:center;gap:5px;flex-shrink:0}
 .aeb-mini-preview{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:1px solid var(--aeb-border);padding-left:10px}
 .aeb-mini .aeb-capsule-controls{flex:0 0 auto;gap:8px}
-.aeb-mini .aeb-mini-rate{width:42px;padding:0;font-size:12px;background:var(--aeb-bg-soft);border-radius:12px}
+.aeb-mini .aeb-mini-rate{width:34px;padding:0;font-size:12px;font-weight:500;line-height:1;border-radius:50%}
+.aeb-mini .aeb-mic-mini,.aeb-mini .aeb-mini-rate{background:var(--aeb-bg-soft);color:var(--aeb-fg-secondary)}
+.aeb-mini .aeb-mic-mini:hover:not(:disabled),.aeb-mini .aeb-mini-rate:hover:not(:disabled){background:var(--aeb-border);color:var(--aeb-fg)}
 .aeb-mini > .aeb-icon{order:0;width:28px}
 .aeb-mini .aeb-voice-capsule{flex:0 1 180px;width:auto}
 @media(max-width:560px){.aeb-mini{width:calc(100vw - 24px);max-width:none;left:12px;right:12px;gap:8px;padding:10px 12px;height:auto;min-height:78px;border-radius:999px;flex-wrap:wrap}.aeb-mini > .aeb-header-avatar.aeb-header-avatar-ip{width:46px;height:46px}.aeb-mini-copy{flex-basis:calc(100% - 62px)}.aeb-mini .aeb-capsule-controls{margin-left:auto}.aeb-mini .aeb-voice-capsule{flex:1 1 150px}.aeb-mini > .aeb-icon{height:32px}}
@@ -1143,4 +1154,14 @@ defineExpose({
 .aeb-ai-message{max-width:92%}
 .aeb-ai-bubble{padding:0}
 .aeb-ai-bubble .aeb-answerline{padding:10px 13px}
+/* Compact role labels and three rounded sound bars, matching the avatar rhythm. */
+.aeb-line .aeb-speaker{display:flex;align-items:center;gap:5px;grid-column:1 / -1;height:16px;margin-bottom:0;font-size:11px;line-height:16px;font-weight:500;color:var(--aeb-fg-secondary)}
+.aeb-speaker-name{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.aeb-speaking-wave{display:inline-flex;align-items:center;justify-content:center;gap:1.5px;width:9px;height:12px;flex-shrink:0;color:var(--aeb-accent)}
+.aeb-speaking-wave svg{display:block;width:2px;height:12px;overflow:visible;transform:scaleY(.3);animation:aeb-speaking-bar .85s ease-in-out infinite alternate}
+.aeb-speaking-wave line{stroke:currentColor;stroke-width:2;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.aeb-speaking-wave svg:nth-child(2){animation-delay:-.34s;height:12px}
+.aeb-speaking-wave svg:nth-child(3){animation-delay:-.65s}
+@keyframes aeb-speaking-bar{0%{transform:scaleY(.25)}50%{transform:scaleY(.65)}100%{transform:scaleY(1)}}
+@media(prefers-reduced-motion:reduce){.aeb-speaking-wave svg{animation:none;transform:scaleY(.6)}}
 </style>

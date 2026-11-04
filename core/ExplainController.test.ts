@@ -765,6 +765,35 @@ describe('ExplainController 对话分组与组级重播', () => {
     controller.destroy()
   }, 15000)
 
+  it('回答朗读中直接追问：停旧音频、保留历史且旧回调不恢复主轨', async () => {
+    const { synth: slowSynth } = createSlowSynth()
+    const { harness, controller, latest } = await startToPlaying({ synthesizer: slowSynth })
+    await playScript(harness, latest)
+    await waitFor(() => (latest.s?.currentTime || 0) > 0.1)
+    await controller.askText('第一问')
+    harness.emit(durableScript('这是一段正在播放的回答，需要允许用户直接打断并继续追问。', 'run-2'))
+    harness.emit({ runState: 'completed', id: 'done-2' })
+    await waitFor(() => latest.s!.answerStatus === 'playing' && latest.s!.answerLineIndex >= 0)
+    const breakpoint = latest.s!.currentTime
+    const runsBefore = harness.runs.length
+    await controller.askText('第二问')
+    expect(latest.s!.dialogGroups).toHaveLength(2)
+    expect(latest.s!.dialogGroups[0].done).toBe(true)
+    expect(latest.s!.answerStatus).toBe('analyzing')
+    expect(latest.s!.activeGroupId).toBe(latest.s!.dialogGroups[1].id)
+    expect(harness.runs).toHaveLength(runsBefore + 1)
+    await new Promise(r => setTimeout(r, 150))
+    expect(latest.s!.phase).toBe('answering')
+    expect(latest.s!.answerStatus).toBe('analyzing')
+    expect(latest.s!.currentTime).toBeCloseTo(breakpoint, 1)
+    await controller.askText('思考中不重复发送')
+    expect(harness.runs).toHaveLength(runsBefore + 1)
+    harness.emit(durableScript('第二个问题的回答。', 'run-3'))
+    harness.emit({ runState: 'completed', id: 'done-3' })
+    await waitFor(() => latest.s!.dialogGroups[1].done, 10000)
+    controller.destroy()
+  }, 15000)
+
   it('回答暂停中继续追问:收口暂停组并发起新追问', async () => {
     const { synth: slowSynth } = createSlowSynth()
     const { harness, controller, latest } = await startToPlaying({ synthesizer: slowSynth })

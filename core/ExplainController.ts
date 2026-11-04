@@ -790,11 +790,12 @@ export const createExplainController = (options: ExplainControllerOptions): Expl
       const trimmed = (text || '').trim()
       if (!trimmed || !sessionId || phase === 'generating' || phase === 'assembling') return
       if (!snapshot().isInterruptEnabled) return
-      // 回答播报暂停中允许继续追问：收口暂停组(保留可重播)，主轨保持停在断点
+      // 回答朗读或暂停时允许新追问：停止旧播报并保留历史，主轨保持原断点
       if (phase === 'answering') {
-        if (answerStatus !== 'paused') return
+        if (!['playing', 'paused'].includes(answerStatus)) return
         answerPaused = false
         answerHalt?.('finalize') // 挂起循环置 halted 自行退出，其内部不再 restore
+        answerSession++ // 作废旧合成/播放回调，防止清理新回答进度或恢复主轨
         answerHalt = null
         const pausedGroup = activeGroup()
         if (pausedGroup) pausedGroup.done = true

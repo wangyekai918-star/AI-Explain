@@ -273,6 +273,24 @@ describe('AiExplainBot 组件', () => {
     expect(submitBtn.attributes('disabled')).toBeDefined() // 空输入仍禁用发送
   })
 
+  it('回答朗读时允许输入并发送新问题，进入思考后禁用输入', async () => {
+    const bot = createBotMock(baseSnapshot({ phase: 'answering', answerStatus: 'playing', activeGroupId: 'g1', dialogGroups: dialogGroupsFixture }))
+    const wrapper = mount(AiExplainBot, { props: { bot } })
+    await flushPromises()
+    await wrapper.find('.aeb-avatar').trigger('click')
+    await wrapper.find('[aria-label="展开"]').trigger('click')
+    expect(wrapper.find('.aeb-input').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[aria-label="点击说话"]').attributes('disabled')).toBeUndefined()
+    await wrapper.find('.aeb-input').setValue('继续追问')
+    expect(wrapper.find('.aeb-send').attributes('disabled')).toBeUndefined()
+    await wrapper.find('.aeb-send').trigger('click')
+    expect(bot.askText).toHaveBeenCalledWith('继续追问')
+    bot.emit({ answerStatus: 'analyzing' })
+    await flushPromises()
+    expect(wrapper.find('.aeb-input').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.aeb-send').attributes('disabled')).toBeDefined()
+  })
+
   it('错误提示脱敏 toast:界面只提示异常,具体原因输出到控制台,5s 自动隐藏', async () => {
     vi.useFakeTimers()
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -315,7 +333,7 @@ describe('AiExplainBot 组件', () => {
     auto.unmount()
   })
 
-  it('气泡不重复显示讲解人，保留读屏身份描述', async () => {
+  it('气泡显示小字号讲解人，音波仅跟随正在播放的当前行', async () => {
     const bot = createBotMock(baseSnapshot({
       phase: 'playing',
       robotConfig: {
@@ -338,8 +356,25 @@ describe('AiExplainBot 组件', () => {
     await wrapper.find('[aria-label="展开"]').trigger('click')
     const speakers = wrapper.findAll('.aeb-speaker')
     expect(speakers).toHaveLength(2)
-    expect(speakers[0].classes()).toContain('aeb-sr-only')
-    expect(speakers[1].classes()).toContain('aeb-sr-only')
+    expect(speakers[0].classes()).not.toContain('aeb-sr-only')
+    expect(speakers[0].text()).toBe('电小智')
+    expect(speakers[1].text()).toBe('数字员工特小慧')
+    expect(wrapper.findAll('.aeb-speaking-wave')).toHaveLength(1)
+    expect(speakers[0].find('.aeb-speaking-wave').exists()).toBe(true)
+    bot.emit({ currentLineIndex: 1 })
+    await flushPromises()
+    expect(wrapper.findAll('.aeb-speaking-wave')).toHaveLength(1)
+    expect(speakers[0].find('.aeb-speaking-wave').exists()).toBe(false)
+    expect(speakers[1].find('.aeb-speaking-wave').exists()).toBe(true)
+    bot.emit({ phase: 'paused' })
+    await flushPromises()
+    expect(wrapper.find('.aeb-speaking-wave').exists()).toBe(false)
+    bot.emit({ phase: 'playing' })
+    await flushPromises()
+    expect(speakers[1].find('.aeb-speaking-wave').exists()).toBe(true)
+    bot.emit({ phase: 'ended' })
+    await flushPromises()
+    expect(wrapper.find('.aeb-speaking-wave').exists()).toBe(false)
     expect(wrapper.find('[part="panel-header"] .aeb-header-avatar').exists()).toBe(true)
     expect(wrapper.findAll('.aeb-chat-orb')).toHaveLength(0)
   })
@@ -392,6 +427,21 @@ describe('AiExplainBot 组件', () => {
     // 回答播报期主轨行不让位高亮（同一时刻只有回答行一个高亮，滚动定位才正确）
     const mainItems = wrapper.findAll('.aeb-subtitles > .aeb-line:not(.aeb-answerline):not(.aeb-askline)')
     expect(mainItems[1].classes()).not.toContain('aeb-active')
+    expect(wrapper.findAll('.aeb-speaking-wave')).toHaveLength(1)
+    expect(answerItems[1].find('.aeb-speaking-wave').exists()).toBe(true)
+    bot.emit({ answerStatus: 'paused' })
+    await flushPromises()
+    expect(wrapper.find('.aeb-speaking-wave').exists()).toBe(false)
+    bot.emit({ answerStatus: 'playing', answerLineIndex: 0 })
+    await flushPromises()
+    expect(answerItems[0].find('.aeb-speaking-wave').exists()).toBe(true)
+    expect(answerItems[1].find('.aeb-speaking-wave').exists()).toBe(false)
+    bot.emit({ answerStatus: 'analyzing' })
+    await flushPromises()
+    expect(wrapper.find('.aeb-speaking-wave').exists()).toBe(false)
+    bot.emit({ phase: 'ended', answerStatus: 'none', answerLineIndex: -1 })
+    await flushPromises()
+    expect(wrapper.find('.aeb-speaking-wave').exists()).toBe(false)
   })
 
   /* ── 追问对话分组：折叠/重播/来源标记 + 进度条打断点标记 ── */
@@ -872,15 +922,15 @@ describe('AiExplainBot 组件', () => {
     expect(wrapper.findAll('.aeb-waveform > span')[0].attributes('style')).toContain('3px')
   })
 
-  it('用户与 AI 有明确身份，主讲解也标为 AI，回答不自动隐藏', async () => {
+  it('用户与讲解人有明确身份，单人气泡显示角色名，回答不自动隐藏', async () => {
     const bot = createBotMock(baseSnapshot({ phase: 'ended', lines: [{ lineId: 'l1', speaker: 'A', text: '主讲解' }], dialogGroups: dialogGroupsFixture }))
     const wrapper = await openVoiceView(bot)
     expect(wrapper.find('.aeb-user-message').text()).toContain('我')
     expect(wrapper.find('.aeb-user-message').text()).toContain('第一问')
     expect(wrapper.find('.aeb-user-message').text()).not.toContain('答一。')
-    expect(wrapper.find('.aeb-ai-message .aeb-speaker').text()).toContain('AI ·')
+    expect(wrapper.find('.aeb-ai-message .aeb-speaker').text()).toBe('小电')
     expect(wrapper.find('.aeb-ai-message').text()).toContain('答一。')
-    expect(wrapper.find('.aeb-subtitles > .aeb-line .aeb-speaker').text()).toContain('AI')
+    expect(wrapper.find('.aeb-subtitles > .aeb-line .aeb-speaker').text()).toBe('小电')
   })
 
 })
